@@ -33,7 +33,7 @@ If your Trimui has a built-in terminal, this is the simplest approach.
    cd /lib && tar -czf /mnt/SDCARD/sysroot/lib.tar .
    
    # Create usr/lib archive (development libraries)
-   cd /usr && tar -czf /mnt/SDCARD/sysroot/usrlib.tar lib
+   cd /usr/lib && tar -czf /mnt/SDCARD/sysroot/usrlib.tar .
    ```
 
 2. **Remove SD card and mount on your Linux machine**
