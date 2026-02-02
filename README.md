@@ -66,6 +66,28 @@ Since we cannot publicly distribute the Trimui filesystem, you need to extract i
 
 ### Quick Start: From an SD Card
 
+**Important**: Due to FAT32 limitations on the Trimui SD card, direct copying may corrupt file permissions and symlinks. The tar method is strongly recommended.
+
+#### Recommended: Create tar archives on device
+
+```bash
+# On device terminal or via ADB:
+mkdir -p /mnt/SDCARD/sysroot
+
+# Create lib archive
+cd /lib && tar -czf /mnt/SDCARD/sysroot/lib.tar .
+
+# Create usr/lib and usr/include archive  
+cd /usr && tar -czf /mnt/SDCARD/sysroot/usrlib.tar lib include
+
+# Then on your Linux machine:
+mkdir -p sysroot/lib sysroot/usr/lib sysroot/usr/include
+tar -xzf /path/to/lib.tar -C ./sysroot/lib/
+tar -xzf /path/to/usrlib.tar -C ./sysroot/usr/
+```
+
+#### Alternative: Direct filesystem access (not recommended)
+
 1. Insert the Trimui Model S SD card into a Linux machine
 2. Mount the root filesystem (usually the largest partition, often `/mnt/trimui` or similar)
 3. Extract the filesystem:
@@ -77,11 +99,11 @@ cp -r /mnt/trimui/* sysroot/
 sudo chown -R $(id -u):$(id -g) sysroot/
 ```
 
-For more detailed instructions including SSH extraction, firmware images, and troubleshooting, see [SYSROOT_EXTRACTION.md](SYSROOT_EXTRACTION.md).
+For more detailed instructions including ADB extraction, firmware images, and troubleshooting FAT32 issues, see [SYSROOT_EXTRACTION.md](SYSROOT_EXTRACTION.md).
 
 ## Alternative Extraction Methods
 
-- **SSH/Network**: If your device is accessible via SSH
+- **ADB**: If your device supports Android Debug Bridge
 - **Firmware Image**: Extract from official `.img` files
 - **Tarball**: If you have a pre-packaged sysroot
 

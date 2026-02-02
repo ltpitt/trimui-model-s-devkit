@@ -2,6 +2,8 @@
 
 This document explains how to extract the Trimui Model S sysroot from your own device for use with this development environment.
 
+> **Note**: This guide was written and tested on **Linux Mint Cinnamon 22**. Commands may vary slightly on other Linux distributions.
+
 ## What is a Sysroot?
 
 A sysroot is a directory containing the essential filesystem structure (libraries, headers, etc.) from the target device. It's used by the cross-compiler to link applications against the correct libraries for your device architecture.
@@ -9,198 +11,168 @@ A sysroot is a directory containing the essential filesystem structure (librarie
 ## Prerequisites
 
 - A Trimui Model S device
-- Access to the device's filesystem (via SD card or SSH)
+- Access to the device's filesystem (via SD card, ADB, or device terminal)
 - A Linux machine for extraction
 
-## Method 1: Extract from SD Card (Recommended)
+## Important Notes
 
-This is the most straightforward method if you have direct access to the SD card.
+- **FAT32 SD Card**: The Trimui Model S uses FAT32, which cannot preserve Linux symlinks, permissions, or special files. **Tar archives are essential** to avoid corrupting the sysroot.
+- **Modular Archives**: The recommended approach creates separate `lib.tar` and `usrlib.tar` archives containing only the essential libraries and headers needed for cross-compilation.
+- **Two Primary Methods**: Use either device terminal or ADB (Android Debug Bridge) to create the archives on the device.
+## Method 1: Extract via Device Terminal (Recommended)
 
-### Steps:
-
-1. **Insert SD card into your Linux machine**
-   - Identify the card:
-     ```bash
-     lsblk | grep -E "mmcblk|sdb|sdc"
-     ```
-   - Look for a device around 8-32 GB in size
-
-2. **Create mount points**
-   ```bash
-   mkdir -p /mnt/trimui_root
-   mkdir -p ~/trimui-sysroot
-   ```
-
-3. **Mount the root partition**
-   - The SD card typically has multiple partitions. The root filesystem is usually the largest one.
-   - If the card is `/dev/mmcblk0`, the root partition might be `/dev/mmcblk0p3` or similar:
-     ```bash
-     sudo mount /dev/mmcblk0p3 /mnt/trimui_root
-     ```
-   - If it's `/dev/sdb`, try `/dev/sdb1`, `/dev/sdb2`, etc.
-
-4. **Extract the filesystem**
-   ```bash
-   cp -r /mnt/trimui_root/* ~/trimui-sysroot/
-   
-   # Fix ownership
-   sudo chown -R $(id -u):$(id -g) ~/trimui-sysroot
-   ```
-
-5. **Verify the extraction**
-   ```bash
-   ls ~/trimui-sysroot/
-   # Should show: bin, boot, dev, etc, home, lib, mnt, proc, root, run, sbin, srv, sys, tmp, usr, var
-   ```
-
-6. **Copy to project**
-   ```bash
-   cp -r ~/trimui-sysroot /path/to/trimui-model-s-devkit/sysroot
-   ```
-
-7. **Unmount the card**
-   ```bash
-   sudo umount /mnt/trimui_root
-   ```
-
-## Method 2: Extract via SSH/Network
-
-If your Trimui device is accessible via SSH:
+If your Trimui has a built-in terminal, this is the simplest approach.
 
 ### Steps:
 
-1. **Connect to device and find IP address**
+1. **Create tar archives on the device terminal**
    ```bash
-   # On the Trimui device or via SSH:
-   ip addr show
-   ```
-
-2. **Extract filesystem via SSH (from your Linux machine)**
-   ```bash
-   # Create sysroot directory
-   mkdir -p trimui-sysroot
+   mkdir -p /mnt/SDCARD/sysroot
    
-   # Use rsync (recommended for efficiency)
-   rsync -av --delete \
-     --exclude=/proc --exclude=/sys --exclude=/dev \
-     root@TRIMUI_IP:/ trimui-sysroot/
-   ```
+   # Create lib archive (core system libraries)
+   cd /lib && tar -czf /mnt/SDCARD/sysroot/lib.tar .
    
-   Replace `TRIMUI_IP` with your device's actual IP address.
-
-3. **Fix permissions**
-   ```bash
-   # If rsync ran as root, fix ownership
-   sudo chown -R $(id -u):$(id -g) trimui-sysroot
+   # Create usr/lib archive (development libraries)
+   cd /usr && tar -czf /mnt/SDCARD/sysroot/usrlib.tar lib
    ```
 
-4. **Copy to project**
+2. **Remove SD card and mount on your Linux machine**
    ```bash
-   cp -r trimui-sysroot /path/to/trimui-model-s-devkit/sysroot
-   ```
-
-## Method 3: Extract from Firmware Image
-
-If you have the official Trimui firmware as an `.img` file:
-
-### Steps:
-
-1. **Find the filesystem image**
-   - Extract or locate the `.img` file from firmware archives
-
-2. **Mount the image**
-   ```bash
-   # Create loop device
-   sudo mount -o loop firmware.img /mnt/trimui_fw
-   ```
-
-3. **Extract filesystem**
-   ```bash
-   mkdir -p ~/trimui-sysroot
-   cp -r /mnt/trimui_fw/* ~/trimui-sysroot/
+   # Find the SD card
+   lsblk | grep -E "mmcblk|sdb|sdc"
    
-   # Fix ownership
-   sudo chown -R $(id -u):$(id -g) ~/trimui-sysroot
+   # Mount the largest partition (usually /dev/mmcblk0p3 or similar)
+   sudo mount /dev/mmcblk0p3 /mnt/trimui_sd
    ```
 
-4. **Unmount**
+3. **Copy archives to your machine**
    ```bash
-   sudo umount /mnt/trimui_fw
+   cp /mnt/trimui_sd/sysroot/lib.tar .
+   cp /mnt/trimui_sd/sysroot/usrlib.tar .
+   
+   sudo umount /mnt/trimui_sd
+   ```
+
+4. **Extract the archives**
+   ```bash
+   mkdir -p sysroot/lib sysroot/usr/lib
+   
+   tar -xzf lib.tar -C sysroot/lib/
+   tar -xzf usrlib.tar -C sysroot/usr/
    ```
 
 5. **Copy to project**
    ```bash
-   cp -r ~/trimui-sysroot /path/to/trimui-model-s-devkit/sysroot
+   cp -r sysroot /path/to/trimui-model-s-devkit/
    ```
 
-## Method 4: Using tar Archive
+## Method 2: Extract via ADB (Android Debug Bridge)
 
-If the sysroot is available as a tarball:
+If your Trimui device supports ADB, this is an alternative to the terminal method.
+
+### Prerequisites
 
 ```bash
-mkdir -p ~/trimui-sysroot
-tar -xzf trimui-sysroot.tar.gz -C ~/trimui-sysroot/
-
-# Fix permissions if extracted as root
-sudo chown -R $(id -u):$(id -g) ~/trimui-sysroot
-
-# Copy to project
-cp -r ~/trimui-sysroot /path/to/trimui-model-s-devkit/sysroot
+# Install ADB on Linux Mint/Ubuntu
+sudo apt install android-tools-adb
 ```
+
+### Steps:
+
+1. **Connect device via USB**
+   ```bash
+   adb devices  # Verify device is detected
+   ```
+
+2. **Create tar archives on the device**
+   ```bash
+   adb shell "mkdir -p /mnt/SDCARD/sysroot"
+   adb shell "cd /lib && tar -czf /mnt/SDCARD/sysroot/lib.tar ."
+   adb shell "cd /usr && tar -czf /mnt/SDCARD/sysroot/usrlib.tar lib"
+   ```
+
+3. **Pull archives to your machine**
+   ```bash
+   adb pull /mnt/SDCARD/sysroot/lib.tar .
+   adb pull /mnt/SDCARD/sysroot/usrlib.tar .
+   ```
+
+4. **Extract the archives**
+   ```bash
+   mkdir -p sysroot/lib sysroot/usr/lib sysroot/usr/include
+   
+   tar -xzf lib.tar -C sysroot/lib/
+   tar -xzf usrlib.tar -C sysroot/usr/
+   ```
+
+5. **Copy to project**
+   ```bash
+   cp -r sysroot /path/to/trimui-model-s-devkit/
+   ```
 
 ## Verifying Your Sysroot
 
-After extraction, verify that essential directories exist:
+After extraction, verify the essential libraries exist:
 
 ```bash
 ls -la sysroot/
+ls -la sysroot/lib/
+ls -la sysroot/usr/lib/
 ```
 
 Should contain:
-- `lib/` - Runtime libraries
-- `usr/lib/` - Additional libraries
-- `usr/include/` - Header files
-- `etc/` - Configuration files
-- `bin/`, `sbin/` - Executables
+- `lib/libc.so.6` - C library (critical)
+- `lib/libm.so.6` - Math library
+- `usr/lib/` - Development libraries
 
-Critical files to check:
+### Quick validation:
 ```bash
-ls -la sysroot/lib/libc.so.6         # C library
-ls -la sysroot/lib/libm.so.6         # Math library
-ls -la sysroot/usr/lib/              # Development libraries
+file sysroot/lib/libc.so.6  # Should show "ELF 32-bit LSB shared object, ARM"
 ```
 
 ## Troubleshooting
 
-### "Permission denied" errors during extraction
+### Tar extraction fails
 
-Run the copy/rsync commands with `sudo`:
 ```bash
-sudo cp -r /mnt/trimui_root/* trimui-sysroot/
-sudo chown -R $(id -u):$(id -g) trimui-sysroot
+# Check tar file integrity
+tar -tzf lib.tar | head  # Should list files without errors
 ```
 
-### "No such file or directory" when mounting
+### SD card mount fails
 
-Check the correct partition:
 ```bash
-sudo fdisk -l /dev/mmcblk0
-# or
-sudo fdisk -l /dev/sdb
+# List available devices and partitions
+lsblk
+sudo fdisk -l
+
+# Try different partition (usually p1, p2, or p3)
+sudo mount /dev/mmcblk0p2 /mnt/trimui_sd
 ```
 
-Look for the largest partition (usually marked as Linux).
+### Symlinks not preserved
 
-### Symlinks pointing to wrong paths
-
-This is normal. The cross-compiler handles relative symlinks correctly.
+This indicates the tar was created incorrectly on the device. Recreate it with:
+```bash
+cd /lib && tar -czf /mnt/SDCARD/sysroot/lib.tar --exclude="lost+found" .
+```
 
 ### Compilation fails with "library not found"
 
-Your sysroot might be incomplete. Verify:
-1. Correct device sysroot was extracted
-2. All directories exist: `lib/`, `usr/lib/`, `usr/include/`
-3. Run `file sysroot/lib/libc.so.6` to confirm it's for ARM
+Verify the sysroot structure:
+```bash
+file sysroot/lib/libc.so.6      # Should show "ELF 32-bit LSB shared object"
+ls sysroot/usr/lib/             # Should have libraries
+find sysroot/ -type l | head    # Check for symlinks (should exist)
+```
+
+### ADB device not found
+
+```bash
+adb kill-server
+adb start-server
+adb devices  # Verify USB debugging is enabled on device
+```
 
 ## Size Expectations
 
