@@ -13,7 +13,10 @@
 
 #include "font8x8_basic.h"   // ← the correct, complete font file
 
-/* Button enumeration (inspired by libmmenu conventions) */
+/* Button enumeration (inspired by libmmenu conventions)
+ * In C, enums auto-increment: BUTTON_UP = 0, BUTTON_DOWN = 1, etc.
+ * No need to explicitly assign each value unless you want specific numbers.
+ */
 typedef enum {
     BUTTON_UP = 0,
     BUTTON_DOWN,
@@ -67,6 +70,23 @@ const char* button_name(Button btn) {
     case BUTTON_MENU:    return "MENU";
     default:             return "???";
     }
+}
+
+/* Play a simple beep on button press */
+void beep_on_button(void) {
+    // Simple 100ms beep at ~1kHz using 8-bit unsigned PCM at 8000 Hz
+    // This is a simple square wave buffer (alternating 255, 0)
+    int dsp = open("/dev/dsp", O_WRONLY | O_NONBLOCK);
+    if (dsp < 0) return;  // Audio device not available, silently skip
+    
+    // 8000 Hz * 0.1 sec = 800 samples; alternating high/low for square wave
+    unsigned char beep[800];
+    for (int i = 0; i < 800; i++) {
+        beep[i] = (i % 2 == 0) ? 255 : 0;  // Square wave
+    }
+    
+    write(dsp, beep, sizeof(beep));
+    close(dsp);
 }
 
 /* Draw a single character scaled 2× in RGB565 */
@@ -195,7 +215,7 @@ int main() {
     char info[128] = "Press buttons...";
     draw_text_2x(fbp, stride, info_x, info_y, info, white);
 
-    // Poll loop: exit on MENU button press or after 30 seconds
+    // Poll loop: exit only when MENU button is pressed
     struct pollfd pfds[MAX_EV];
     int active_fds = 0;
     for (int i = 0; i < MAX_EV; i++) {
@@ -206,14 +226,12 @@ int main() {
         }
     }
 
-    int timeout_ms = 100; // poll timeout
-    time_t start = time(NULL);
+    int timeout_ms = 100; // poll timeout (non-blocking check)
     int running = 1;
     while (running) {
         if (active_fds == 0) {
-            // No input devices found: just wait a short time then exit
-            usleep(200 * 1000);
-            if (time(NULL) - start > 5) break;
+            // No input devices found: wait indefinitely for input
+            usleep(100 * 1000);
             continue;
         }
 
@@ -233,6 +251,11 @@ int main() {
                             fill_rect(fbp, stride, button_x, button_y, button_w, button_h, bg);
                             draw_text_2x(fbp, stride, button_x, button_y, button_info, white);
                             
+                            // Beep on button press
+                            if (ev.value == 1) {
+                                beep_on_button();
+                            }
+                            
                             // Exit on MENU button press
                             if (btn == BUTTON_MENU && ev.value == 1) {
                                 running = 0;
@@ -247,9 +270,6 @@ int main() {
                 }
             }
         }
-
-        // Timeout exit after 30s
-        if (time(NULL) - start > 30) break;
     }
 
     // Close input fds

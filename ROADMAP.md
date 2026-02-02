@@ -64,8 +64,9 @@ The repo today contains **documentation + initial research** — this roadmap wi
 
 - **Toolchain (Docker)**: reproducible Docker build and `CFLAGS` set for ARMv5 — see [Dockerfile](Dockerfile) and the development notes in [README.md](README.md).
 - **Sysroot extraction**: documented extraction and verification steps — see [SYSROOT_EXTRACTION.md](SYSROOT_EXTRACTION.md).
-- **Example app**: `hellotrimui` framebuffer example and build script — see [examples/hellotrimui/hellotrimui.c](examples/hellotrimui/hellotrimui.c) and [examples/hellotrimui/build.sh](examples/hellotrimui/build.sh).
+- **Combined example app**: `hellotrimui` with graphics (framebuffer), input handling (evdev), and button mapping — see [examples/hellotrimui/hellotrimui.c](examples/hellotrimui/hellotrimui.c) and [examples/hellotrimui/build.sh](examples/hellotrimui/build.sh).
 - **Font data**: included `font8x8_basic.h` used by the example — see [examples/hellotrimui/font8x8_basic.h](examples/hellotrimui/font8x8_basic.h).
+- **Input mapping**: button enums and event code mappings (inspired by libmmenu conventions) for consistent control handling.
 
 ---
 
