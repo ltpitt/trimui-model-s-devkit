@@ -16,3 +16,15 @@ podman run --rm \
 
 echo "${GREEN}✔ Build complete!${RESET}"
 echo "${GREEN}✔ Output: ./hellotrimui${RESET}"
+
+echo "${BLUE}▶ Killing any running hellotrimui on device...${RESET}"
+adb shell killall -9 hellotrimui
+
+echo "${BLUE}▶ Creating directory on TrimUI device...${RESET}"
+adb shell mkdir -p /mnt/SDCARD/Apps/hellotrimui/
+
+echo "${BLUE}▶ Pushing hellotrimui to TrimUI device...${RESET}"
+adb push hellotrimui /mnt/SDCARD/Apps/hellotrimui/
+
+echo "${BLUE}▶ Running hellotrimui on TrimUI device...${RESET}"
+adb shell /mnt/SDCARD/Apps/hellotrimui/hellotrimui

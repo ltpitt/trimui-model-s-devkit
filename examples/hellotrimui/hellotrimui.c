@@ -10,6 +10,9 @@
 #include <linux/input.h>
 #include <poll.h>
 #include <errno.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "font8x8_basic.h"   // ← the correct, complete font file
 
@@ -34,20 +37,29 @@ typedef enum {
     BUTTON_UNKNOWN,
 } Button;
 
-/* Map evdev KEY codes to logical buttons */
+/* Map evdev KEY codes to logical buttons
+ * TrimUI Model S button-to-evdev mappings:
+ *   DPAD: UP=103, DOWN=108, LEFT=105, RIGHT=106
+ *   Action buttons: X=42 (North), Y=56 (West), A=57 (East), B=29 (South)
+ *   Shoulders: L=15, R=14
+ *   Menu: SELECT=97, START=28, MENU=1
+ * These codes are discovered by reading /dev/input/eventX with evdev
+ */
 Button evdev_to_button(int code) {
     switch (code) {
-    case KEY_UP:        return BUTTON_UP;
-    case KEY_DOWN:      return BUTTON_DOWN;
-    case KEY_LEFT:      return BUTTON_LEFT;
-    case KEY_RIGHT:     return BUTTON_RIGHT;
-    case KEY_ENTER:     return BUTTON_A;        // commonly mapped
-    case KEY_BACKSPACE: return BUTTON_B;        // commonly mapped
-    case KEY_SPACE:     return BUTTON_X;        // fallback
-    case KEY_MENU:      return BUTTON_MENU;
-    case KEY_SELECT:    return BUTTON_SELECT;
-    case KEY_VOLUMEUP:  return BUTTON_R;
-    case KEY_VOLUMEDOWN:return BUTTON_L;
+    case 103:           return BUTTON_UP;       // UP = 103
+    case 108:           return BUTTON_DOWN;     // DOWN = 108
+    case 105:           return BUTTON_LEFT;     // LEFT = 105
+    case 106:           return BUTTON_RIGHT;    // RIGHT = 106
+    case 42:            return BUTTON_X;        // NORTH = 42
+    case 56:            return BUTTON_Y;        // WEST = 56
+    case 57:            return BUTTON_A;        // EAST = 57
+    case 29:            return BUTTON_B;        // SOUTH = 29
+    case 15:            return BUTTON_L;        // L = 15
+    case 14:            return BUTTON_R;        // R = 14
+    case 28:            return BUTTON_START;    // START = 28
+    case 97:            return BUTTON_SELECT;   // SELECT = 97
+    case 1:             return BUTTON_MENU;     // MENU = 1
     default:            return BUTTON_UNKNOWN;
     }
 }
@@ -74,19 +86,26 @@ const char* button_name(Button btn) {
 
 /* Play a simple beep on button press */
 void beep_on_button(void) {
-    // Simple 100ms beep at ~1kHz using 8-bit unsigned PCM at 8000 Hz
-    // This is a simple square wave buffer (alternating 255, 0)
-    int dsp = open("/dev/dsp", O_WRONLY | O_NONBLOCK);
-    if (dsp < 0) return;  // Audio device not available, silently skip
-    
-    // 8000 Hz * 0.1 sec = 800 samples; alternating high/low for square wave
-    unsigned char beep[800];
-    for (int i = 0; i < 800; i++) {
-        beep[i] = (i % 2 == 0) ? 255 : 0;  // Square wave
+    // Non-blocking beep: fork a child process so event loop continues immediately
+    // This makes button presses feel instant instead of waiting for sound to finish
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process: play beep and exit
+        int dsp = open("/dev/dsp", O_WRONLY | O_NONBLOCK);
+        if (dsp < 0) exit(0);
+        
+        // Brief 50ms beep at 8kHz
+        unsigned char beep[400];
+        for (int i = 0; i < 400; i++) {
+            beep[i] = (i % 2 == 0) ? 255 : 0;
+        }
+        
+        ssize_t written = write(dsp, beep, sizeof(beep));
+        (void)written;
+        close(dsp);
+        exit(0);
     }
-    
-    write(dsp, beep, sizeof(beep));
-    close(dsp);
+    // Parent continues immediately - no blocking!
 }
 
 /* Draw a single character scaled 2× in RGB565 */
@@ -134,11 +153,53 @@ void fill_rect(uint8_t *fbp, int stride, int x, int y, int w, int h, uint16_t co
 }
 
 int main() {
-    int fb = open("/dev/fb0", O_RDWR);
-    if (fb < 0) {
-        perror("open");
-        return 1;
+    // Redirect stdio to prevent launcher interference
+    FILE *f_stdin = freopen("/dev/null", "r", stdin);
+    FILE *f_stdout = freopen("/dev/null", "w", stdout);
+    FILE *f_stderr = freopen("/dev/null", "w", stderr);
+    (void)f_stdin; (void)f_stdout; (void)f_stderr;
+    
+    // Ignore signals that might be sent by the launcher
+    signal(SIGTERM, SIG_IGN);
+    signal(SIGINT, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
+    signal(SIGTSTP, SIG_IGN);
+    signal(SIGCONT, SIG_IGN);
+    
+    // Try to take control of the console
+    int console = open("/dev/console", O_RDWR);
+    if (console >= 0) {
+        // Successfully opened console
+        (void)console; // Keep it open
     }
+    
+    // Small delay to ensure proper initialization
+    usleep(100000); // 100ms
+    
+    // Set high priority to ensure we stay in foreground
+    int prio = nice(-20);
+    (void)prio; // Ignore return value
+    
+    // Detach from parent process
+    setsid();
+    
+    // Open framebuffer device
+    // Try with O_EXCL first to get exclusive access, fall back to shared mode
+    int fb = open("/dev/fb0", O_RDWR | O_EXCL);
+    if (fb < 0) {
+        // Try without O_EXCL if that failed
+        fb = open("/dev/fb0", O_RDWR);
+        if (fb < 0) {
+            return 1;
+        }
+    }
+    
+    // Suspend the launcher so we can take over the screen and input
+    // (Kill -STOP pauses the process, -CONT resumes it)
+    int ret_kill1 = system("killall -STOP gmenunx 2>/dev/null");
+    int ret_kill2 = system("killall -STOP gmenu2x 2>/dev/null");
+    int ret_kill3 = system("killall -STOP MainUI 2>/dev/null");
+    (void)ret_kill1; (void)ret_kill2; (void)ret_kill3;
 
     struct fb_var_screeninfo vinfo;
     struct fb_fix_screeninfo finfo;
@@ -146,13 +207,15 @@ int main() {
     ioctl(fb, FBIOGET_VSCREENINFO, &vinfo);
     ioctl(fb, FBIOGET_FSCREENINFO, &finfo);
 
+    // Map framebuffer into memory
+    // RGB565 format: 2 bytes per pixel (RRRRRGGGGGGBBBBB)
     uint8_t *fbp = mmap(NULL, finfo.smem_len,
                         PROT_READ | PROT_WRITE,
                         MAP_SHARED, fb, 0);
 
     int width  = vinfo.xres;        // 320
     int height = vinfo.yres;        // 240
-    int stride = finfo.line_length; // 640 bytes
+    int stride = finfo.line_length; // 640 bytes (320 pixels * 2 bytes)
 
     // Colors
     uint16_t bg    = (0 << 11) | (0 << 5) | 31;  // dark blue
@@ -182,6 +245,13 @@ int main() {
     int button_h = 48;
 
     char button_info[128] = "No button pressed";
+    int last_btn_code = -1;
+    Button last_btn = BUTTON_UNKNOWN;
+    int last_btn_state = 0;  // 0 = released, 1 = pressed
+    int prev_btn_code = -1;  // Track previous button to detect state changes
+    int prev_btn_state = 0;  // Track previous press/release state
+    Button prev_btn = BUTTON_UNKNOWN;
+    int need_redraw = 1;  // Flag to only redraw when state changes (instant response)
     
     // Exit instruction (bottom)
     const char *exit_msg = "Press MENU to exit";
@@ -193,9 +263,13 @@ int main() {
     draw_text_2x(fbp, stride, button_x, button_y, button_info, white);
     draw_text_2x(fbp, stride, exit_x, exit_y, exit_msg, white);
 
-    // Prepare input devices (try common event nodes)
-    #define MAX_EV 4
+    // Prepare input devices (try event0-event15, only open ones that exist)
+    // Linux input subsystem exposes button presses via /dev/input/eventN
+    // Multiple devices may report the same button, so we monitor all of them
+    // O_NONBLOCK ensures read() returns immediately if no data available
+    #define MAX_EV 16
     int evfds[MAX_EV];
+    int num_evs = 0;  // Track how many event devices we actually opened
     for (int i = 0; i < MAX_EV; i++) evfds[i] = -1;
     for (int i = 0; i < MAX_EV; i++) {
         char path[64];
@@ -203,19 +277,12 @@ int main() {
         int fd = open(path, O_RDONLY | O_NONBLOCK);
         if (fd >= 0) {
             evfds[i] = fd;
+            num_evs++;
         }
     }
 
-    // Display area for button press info (below "Hello Trimui")
-    int info_x = 8;
-    int info_y = start_y + 48;
-    int info_w = width - 16;
-    int info_h = 32;
-
-    char info[128] = "Press buttons...";
-    draw_text_2x(fbp, stride, info_x, info_y, info, white);
-
-    // Poll loop: exit only when MENU button is pressed
+    // Use poll() to efficiently wait for input on multiple devices
+    // Much better than spinning in a loop checking each device
     struct pollfd pfds[MAX_EV];
     int active_fds = 0;
     for (int i = 0; i < MAX_EV; i++) {
@@ -226,7 +293,7 @@ int main() {
         }
     }
 
-    int timeout_ms = 100; // poll timeout (non-blocking check)
+    int timeout_ms = 1; // 1ms timeout for ultra-responsive display updates (instant feel)
     int running = 1;
     while (running) {
         if (active_fds == 0) {
@@ -234,46 +301,82 @@ int main() {
             usleep(100 * 1000);
             continue;
         }
-
         int ret = poll(pfds, active_fds, timeout_ms);
-        if (ret > 0) {
-            for (int i = 0; i < active_fds; i++) {
-                if (pfds[i].revents & POLLIN) {
-                    struct input_event ev;
-                    ssize_t rd = read(pfds[i].fd, &ev, sizeof(ev));
-                    if (rd == (ssize_t)sizeof(ev)) {
-                        if (ev.type == EV_KEY) {
-                            Button btn = evdev_to_button(ev.code);
-                            const char *action = (ev.value == 1) ? "pressed" : "released";
-                            
-                            // Update button display in center
-                            snprintf(button_info, sizeof(button_info), "Button: %s %s", button_name(btn), action);
-                            fill_rect(fbp, stride, button_x, button_y, button_w, button_h, bg);
-                            draw_text_2x(fbp, stride, button_x, button_y, button_info, white);
-                            
-                            // Beep on button press
-                            if (ev.value == 1) {
-                                beep_on_button();
+        for (int i = 0; i < active_fds; i++) {
+            if (pfds[i].revents & POLLIN) {
+                struct input_event ev;
+                // Read multiple events in a loop to not miss any
+                while (read(pfds[i].fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
+                    if (ev.type == EV_KEY) {
+                        Button btn = evdev_to_button(ev.code);
+                        
+                        // Ignore unknown buttons
+                        if (btn == BUTTON_UNKNOWN) continue;
+                        
+                        // Only redraw on meaningful state changes
+                        int state_changed = 0;
+                        
+                        if (ev.value == 1) {
+                            // Button press - always show it
+                            if (btn != last_btn || ev.code != last_btn_code || last_btn_state != 1) {
+                                state_changed = 1;
                             }
-                            
-                            // Exit on MENU button press
-                            if (btn == BUTTON_MENU && ev.value == 1) {
-                                running = 0;
-                                break;
+                        } else if (ev.value == 0) {
+                            // Button release - only clear if it's the button we're displaying
+                            if (btn == last_btn && last_btn_state == 1) {
+                                state_changed = 1;
                             }
-                        } else if (ev.type == EV_ABS || ev.type == EV_REL) {
-                            snprintf(button_info, sizeof(button_info), "Axis: type=%d code=%d value=%d", ev.type, ev.code, ev.value);
-                            fill_rect(fbp, stride, button_x, button_y, button_w, button_h, bg);
-                            draw_text_2x(fbp, stride, button_x, button_y, button_info, white);
+                        }
+                        
+                        if (state_changed) {
+                            last_btn = btn;
+                            last_btn_code = ev.code;
+                            last_btn_state = ev.value;
+                            prev_btn = btn;
+                            prev_btn_code = ev.code;
+                            prev_btn_state = ev.value;
+                            need_redraw = 1;
+                        }
+                        
+                        // Beep on button press
+                        if (ev.value == 1) {
+                            beep_on_button();
+                        }
+                        // Exit on MENU button press
+                        if (btn == BUTTON_MENU && ev.value == 1) {
+                            running = 0;
+                            break;
                         }
                     }
                 }
             }
         }
+        
+        // Update display based on actual button state, not elapsed time
+        // Show button when pressed (state=1), clear when released (state=0)
+        if (need_redraw) {
+            if (last_btn != BUTTON_UNKNOWN && last_btn_state == 1) {
+                // Button is currently pressed
+                snprintf(button_info, sizeof(button_info), "%s (code:%d)", button_name(last_btn), last_btn_code);
+            } else {
+                // Button was released or no button pressed yet
+                snprintf(button_info, sizeof(button_info), "No button pressed");
+            }
+            
+            fill_rect(fbp, stride, button_x, button_y, button_w, button_h, bg);
+            draw_text_2x(fbp, stride, button_x, button_y, button_info, white);
+            need_redraw = 0;
+        }
     }
 
     // Close input fds
     for (int i = 0; i < MAX_EV; i++) if (evfds[i] >= 0) close(evfds[i]);
+
+    // Resume launcher processes before exiting
+    int ret_resume1 = system("killall -CONT gmenunx 2>/dev/null");
+    int ret_resume2 = system("killall -CONT gmenu2x 2>/dev/null");
+    int ret_resume3 = system("killall -CONT MainUI 2>/dev/null");
+    (void)ret_resume1; (void)ret_resume2; (void)ret_resume3;
 
     munmap(fbp, finfo.smem_len);
     close(fb);
