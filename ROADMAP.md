@@ -54,7 +54,18 @@ The **SDK** sits on top and provides:
 - helper scripts  
 - developer documentation  
 
+# 🗺️ Project Roadmap
+
 The repo today contains **documentation + initial research** — this roadmap will expand it into a full toolchain + SDK.
+
+---
+
+## **Progress — Implemented**
+
+- **Toolchain (Docker)**: reproducible Docker build and `CFLAGS` set for ARMv5 — see [Dockerfile](Dockerfile) and the development notes in [README.md](README.md).
+- **Sysroot extraction**: documented extraction and verification steps — see [SYSROOT_EXTRACTION.md](SYSROOT_EXTRACTION.md).
+- **Example app**: `hellotrimui` framebuffer example and build script — see [examples/hellotrimui/hellotrimui.c](examples/hellotrimui/hellotrimui.c) and [examples/hellotrimui/build.sh](examples/hellotrimui/build.sh).
+- **Font data**: included `font8x8_basic.h` used by the example — see [examples/hellotrimui/font8x8_basic.h](examples/hellotrimui/font8x8_basic.h).
 
 ---
 
@@ -82,16 +93,16 @@ The repo today contains **documentation + initial research** — this roadmap wi
 > Build the core developer environment.
 
 ### 🎯 Goals
-- [ ] Define target architecture & compile settings  
-- [ ] Create reproducible toolchain (Docker or scripts)  
-- [ ] Extract or build sysroot  
+- [x] Define target architecture & compile settings  
+- [x] Create reproducible toolchain (Docker or scripts)  
+- [x] Extract or build sysroot  
 - [ ] Establish SDK structure:
   - `/include`  
   - `/lib`  
   - `/examples`  
   - `/templates`  
-- [ ] Provide example apps (hello world, input test, graphics sample)  
-- [ ] “Your first Trimui app” tutorial  
+- [x] Provide example apps (hello world, input test, graphics sample)  
+- [x] “Your first Trimui app” tutorial  
 - [ ] Optional: VS Code integration  
 
 ### Community Opportunities
