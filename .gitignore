@@ -53,3 +53,8 @@ dkms.conf
 
 # debug information files
 *.dwo
+# Sysroot - extracted from device, not tracked in git
+sysroot/
+
+# Build outputs
+examples/hellotrimui/hellotrimui
